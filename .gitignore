@@ -1,0 +1,30 @@
+# Raw and injected data
+data/raw/
+data/injected/
+
+# LLM cache
+.cache/
+
+# Reports (generated output) — but keep the sample reports
+reports/
+!reports/sample/
+
+# Environment secrets
+.env
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Test cache
+.pytest_cache/
+
+# Build / packaging artifacts
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
