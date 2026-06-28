@@ -29,51 +29,55 @@ Great Expectations and dbt tests are powerful contracts for datasets you already
 - **Freight ratio check** — Identifies line items where `freight_value / price > 1.0`, indicating economically anomalous shipping cost data
 - **State machine violation check** — Finds `orders` rows with a non-null `order_delivered_customer_date` but `order_status != 'delivered'` — impossible lifecycle state combinations
 
-**Cross-Table (Referential Integrity) Checks (4)**
+**Cross-Table Checks (4)**
 
-- **order_items → orders** — Orphaned order items with no matching parent order
-- **order_items → sellers** — Order items referencing seller IDs that don't exist in the sellers table
-- **order_payments → orders** — Payment records with no matching order
-- **orders → customers** — Orders referencing customer IDs that don't exist in the customers table
+- **Referential integrity** — Checks all 6 FK relationships (order_items → orders, sellers, products; order_payments → orders; order_reviews → orders; orders → customers). Severity scales with orphan rate (>1% → HIGH).
+- **Payment / order-item reconciliation** — For each order, compares sum of `order_payments.payment_value` against sum of `order_items.(price + freight_value)`. Discrepancies > $0.50 are flagged (>2% of orders → HIGH).
+- **Geolocation bounds check** — Flags coordinates outside Brazil's bounding box (lat −34 to +5, lng −74 to −34), including lat/lng swap detection.
+- **Duplicate payment check** — Finds duplicate `(order_id, payment_sequential, payment_value)` triples in `order_payments`. Always HIGH — causes double-counting in revenue reporting.
 
 **10 injected anomaly types** covering all of the above, reproducibly seeded for consistent demo output.
 
 ---
 
-## Demo: Before and After
+## Demo: Sample Report
+
+**[View full sample report →](reports/sample/report_20260628_205948.md)** | **[JSON →](reports/sample/report_20260628_205948.json)**
+
+Run against the Olist dataset with 10 injected anomalies: **20 findings, score 0/100 (FAIL), 9 HIGH · 10 MEDIUM · 1 LOW** across 6 tables.
 
 ### Raw data — Duplicate Payment Records
 
 ```
-order_id              | payment_sequential | payment_value
-----------------------|--------------------|---------------
-abc123def456gh789     | 1                  | 127.50
-abc123def456gh789     | 1                  | 127.50   ← duplicate
-b7e92cf014ad3851f     | 1                  |  89.00
-b7e92cf014ad3851f     | 1                  |  89.00   ← duplicate
+order_id                         | payment_sequential | payment_value
+---------------------------------|--------------------|---------------
+a9810da82917af2d9aefd1278f1dcfa0 | 1                  | 127.50
+a9810da82917af2d9aefd1278f1dcfa0 | 1                  | 127.50   ← duplicate
+ba78997921bbcdc1373bb41e913ab953 | 1                  |  89.00
+ba78997921bbcdc1373bb41e913ab953 | 1                  |  89.00   ← duplicate
 ```
 
-### After — Claude's analysis in the audit report
+### After — Claude's analysis (actual output, F001)
 
 ```json
 {
   "finding_id": "F001",
   "check_name": "duplicate_check",
-  "anomaly_type": "Duplicate Payment Records",
+  "anomaly_type": "Duplicate Composite Key Violation",
   "table": "order_payments",
   "column": null,
   "severity": "HIGH",
-  "rows_affected": 1847,
-  "pct_affected": 1.85,
-  "plain_english_explanation": "1,847 payment rows appear twice with identical order_id, payment_sequential, and payment_value. In a live payment system, these duplicates would cause revenue to be double-counted in financial aggregations — a $47,231 overstatement on this dataset alone.",
-  "likely_root_cause": "Most probable cause is an at-least-once delivery guarantee in the payment event pipeline without idempotency checks on insert — the payment event was processed twice and both rows were written to the payments table.",
-  "downstream_impact": "Any revenue aggregation that sums payment_value across this table will overstate total GMV. Finance dashboards, seller payout calculations, and installment tracking models are all affected until duplicates are removed.",
-  "recommendation": "1. Add a unique constraint on (order_id, payment_sequential) at the database layer. 2. Implement idempotency key validation in the payment ingestion service. 3. Run a deduplication backfill job keyed on (order_id, payment_sequential, payment_value).",
+  "rows_affected": 3858,
+  "pct_affected": 3.65,
+  "plain_english_explanation": "The combination of order_id and payment_sequential, which should uniquely identify each payment installment for an order, is duplicated 1,929 times — producing 3,858 affected rows (3.65% of the table). This means the same payment step for the same order appears more than once, making it impossible to determine which record is the authoritative payment event without additional deduplication logic.",
+  "likely_root_cause": "The most probable cause is an idempotency failure in the ETL or ingestion pipeline — specifically, the payment records are being re-inserted on each pipeline run rather than upserted, likely because the target table lacks a PRIMARY KEY or UNIQUE constraint on (order_id, payment_sequential) to reject duplicates at the database level.",
+  "downstream_impact": "Any revenue reporting, GMV calculations, or payment reconciliation that aggregates payment_value from order_payments will be inflated by the duplicate rows — an order with two duplicate payment_sequential=1 rows will have its payment amount double-counted. Fraud detection models and customer lifetime value features trained on this table will also be corrupted.",
+  "recommendation": "1. Immediately add a UNIQUE constraint on (order_id, payment_sequential) to prevent future duplicates and alert on violations. 2. Deduplicate by retaining one row per pair using MAX(ingestion_timestamp) as the tie-breaker. 3. Audit the ETL job to confirm it uses UPSERT rather than blind INSERT.",
   "llm_confidence": "HIGH"
 }
 ```
 
-This is what the LLM layer adds: not "duplicates detected" but a specific root cause hypothesis, a quantified financial impact, and a three-step remediation plan.
+This is what the LLM layer adds: not "duplicates detected" but a specific root cause hypothesis, the mechanism of corruption, and a three-step remediation plan. **[See all 20 findings →](reports/sample/report_20260628_205948.md)**
 
 ---
 
@@ -164,10 +168,10 @@ Reports are written to `reports/` as both JSON (machine-readable) and Markdown (
 
 | Single-Table Checks (8) | Cross-Table Checks (4) |
 |-------------------------|------------------------|
-| Null rate — configurable per column | order_items → orders (orphaned items) |
-| Duplicate key — composite key support | order_items → sellers (orphaned seller refs) |
-| Range / domain validation | order_payments → orders (orphaned payments) |
-| Future date detection | orders → customers (orphaned customer refs) |
+| Null rate — configurable per column | Referential integrity — all 6 FK relationships |
+| Duplicate key — composite key support | Payment / order-item reconciliation |
+| Range / domain validation | Geolocation bounds + lat/lng swap detection |
+| Future date detection | Duplicate payment triple detection |
 | Negative monetary value detection | |
 | Category encoding drift | |
 | Freight ratio anomaly | |

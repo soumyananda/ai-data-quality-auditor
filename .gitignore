@@ -6,7 +6,7 @@ data/injected/
 .cache/
 
 # Reports (generated output) — but keep the sample reports
-reports/
+reports/*
 !reports/sample/
 
 # Environment secrets

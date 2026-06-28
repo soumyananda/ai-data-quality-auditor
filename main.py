@@ -102,7 +102,8 @@ def _print_summary(
     score: int,
     verdict: str,
     counts: dict[str, int],
-    report_path: Path,
+    json_path: str,
+    md_path: str,
 ) -> None:
     click.echo()
     click.echo("─" * 60)
@@ -114,7 +115,8 @@ def _print_summary(
         f"{counts['MEDIUM']} MEDIUM  "
         f"{counts['LOW']} LOW"
     )
-    click.echo(f"  Report  : {report_path}")
+    click.echo(f"  Report  : {md_path}")
+    click.echo(f"  JSON    : {json_path}")
     click.echo("─" * 60)
     click.echo()
 
@@ -228,7 +230,7 @@ def main(
     # ------------------------------------------------------------------
     click.echo()
     click.echo(f"Writing reports to: {output_dir_obj.resolve()}")
-    report_path: Path = report_builder.build_and_write(
+    json_path, md_path = report_builder.build_and_write(
         all_results, analyses, output_dir_obj
     )
 
@@ -238,7 +240,7 @@ def main(
     score = _overall_score(all_results)
     verdict = _verdict(score)
     counts = _count_by_severity(all_results)
-    _print_summary(score, verdict, counts, report_path)
+    _print_summary(score, verdict, counts, json_path, md_path)
 
 
 if __name__ == "__main__":
