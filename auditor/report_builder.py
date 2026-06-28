@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
 from tabulate import tabulate
@@ -137,7 +137,7 @@ def _build_json_report(
     return {
         "report_metadata": {
             "report_id": str(uuid.uuid4()),
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "dataset": DATASET_NAME,
             "dataset_version": DATASET_VERSION,
             "auditor_version": AUDITOR_VERSION,
@@ -347,7 +347,7 @@ def build_and_write(
     report = _build_json_report(check_results, analyses)
     markdown = _build_markdown(report)
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(output_dir, f"report_{timestamp}.json")
     md_path = os.path.join(output_dir, f"report_{timestamp}.md")
 
